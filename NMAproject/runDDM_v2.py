@@ -195,7 +195,6 @@ mean_vals = data_rt.groupby('strength_diff')['choice'].mean()
 print(mean_vals)
 
 # create choice history variable 
-# convert all first trials of each session to nan
 data_rt["choice_hist"] = data_rt["choice"]
 data_rt["choice_hist"] = data_rt.choice_hist.shift(1)
 
@@ -203,11 +202,68 @@ data_rt["choice_hist"] = data_rt.choice_hist.shift(1)
 first_rows = data_rt.groupby(['session_id', 'subject_id']).head(1).index
 data_rt.loc[first_rows, 'choice_hist'] = None 
 
+# -------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------- #
 
+#### Prepare parameters and variables for ddm 
 
+###### VERSION 1 (Model 1)
 
+# subset one subject 
+data_rt["subject_id"].head(10)
 
+# extract data for subject 7
+sub_df_rts = data_rt[data_rt["subject_id"]==1]
+# sub_df_rts = data_rt
 
+len(sub_df_rts)
+
+# run ddm version 1 with one sub
+
+# Create a sample object from our data.  This is the standard input
+# format for fitting procedures.  Since RT and correct/error are
+# both mandatory columns, their names are specified by command line
+# arguments.
+data_sample = Sample.from_pandas_dataframe(sub_df_rts, rt_column_name="reaction_time", choice_column_name="choice")
+
+# create conditions
+conditions = ["strength_diff", "subject_id", "choice"]
+
+# create class of version 1 pyDDM
+class DriftCoherence(ddm.models.Drift):
+    name = "Drift depends linearly on coherence"
+    required_parameters = ["driftdiff"] # <-- Parameters we want to include in the model
+    required_conditions = ["strength_diff"] # <-- Task parameters ("conditions"). Should be the same name as in the sample.
+
+    # We must always define the get_drift function, which is used to compute the instantaneous value of drift.
+    def get_drift(self, conditions, **kwargs):
+        return self.driftdiff * conditions['strength_diff']
+    
+# fit the model
+model_rs = Model(name='Laquitaine data, drift varies with strategy used',
+                 drift=DriftCoherence(driftdiff=Fittable(minval=0, maxval=20)),
+                 noise=NoiseConstant(noise=1),
+                 bound=BoundConstant(B=Fittable(minval=.1, maxval=1.5)),
+                 # Since we can only have one overlay, we use
+                 # OverlayChain to string together multiple overlays.
+                 # They are applied sequentially in order.  OverlayNonDecision
+                 # implements a non-decision time by shifting the
+                 # resulting distribution of response times by
+                 # `nondectime` seconds.
+                 overlay=OverlayChain(overlays=[OverlayNonDecision(nondectime=Fittable(minval=0, maxval=.4)),
+                                                OverlayPoissonMixture(pmixturecoef=.02,
+                                                                      rate=1)]),
+                 dx=.001, dt=.0001, T_dur=5.1)
+
+fit_model_rs = fit_adjust_model(sample=data_sample, model=model_rs, verbose=False)
+
+# display model output 
+display_model(fit_model_rs)
+
+# let's access the parameters 
+fit_model_rs.parameters()
+
+# plot the fit 
 
 
 
