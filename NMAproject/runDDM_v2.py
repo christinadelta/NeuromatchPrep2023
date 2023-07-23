@@ -264,6 +264,85 @@ display_model(fit_model_rs)
 fit_model_rs.parameters()
 
 # plot the fit 
+pyddm.plot.plot_fit_diagnostics(model=fit_model_rs, sample=data_sample)
+
+# plot on gui
+# DDM version 2 with outlier trials removed
+
+# Remove short and long RTs, as in 10.1523/JNEUROSCI.4684-04.2005.
+# This is not strictly necessary, but is performed here for
+# compatibility with this study.
+sub_df_rts = sub_df_rts[sub_df_rts["est_rt"] > .05] # Remove trials less than 100ms
+sub_df_rts = sub_df_rts[sub_df_rts["est_rt"] < 5] # Remove trials greater than 5000ms
+
+# refitting the model 
+
+# Create a sample object from our data.  This is the standard input
+# format for fitting procedures.  Since RT and correct/error are
+# both mandatory columns, their names are specified by command line
+# arguments.
+data_sample = Sample.from_pandas_dataframe(sub_df_rts, rt_column_name="reaction_time", choice_column_name="choice")
+
+fit_model_rs = fit_adjust_model(sample=data_sample, model=model_rs, verbose=False)
+
+# check the fit
+display_model(fit_model_rs)
+
+# plot
+pyddm.plot.plot_fit_diagnostics(model=fit_model_rs, sample=data_sample)
+
+# Plot decision variable
+pyddm.plot.plot_decision_variable_distribution(model=fit_model_rs, conditions = {'strength_diff': -3}, resolution=0.1, figure=None)
+
+# play with the gui 
+pyddm.plot.model_gui(model=model_rs, sample=data_sample) # doesnt work on my local 
+
+# let's try model 3, "strategy-dependent drift rate with leak"
+
+# create conditions
+conditions = ["strength_diff", "subject_id", "choice"]
+
+# create leaky model class
+class DriftCoherenceLeak(ddm.models.Drift):
+    name = "Leaky drift depends linearly on choice strategy"
+    required_parameters = ["driftdiff", "leak"] # <-- Parameters we want to include in the model
+    required_conditions = ["strength_diff"] # <-- Task parameters ("conditions"). Should be the same name as in the sample.
+    
+    # We must always define the get_drift function, which is used to compute the instantaneous value of drift.
+    def get_drift(self, x, conditions, **kwargs):
+        return self.driftdiff * conditions['strength_diff'] + self.leak * x
+    
+# full model definition
+from pyddm.models import BoundCollapsingExponential
+
+model_leak = Model(name='Laquitaine data, leaky drift varies with strategy used',
+                   drift=DriftCoherenceLeak(driftdiff=Fittable(minval=0, maxval=20),
+                                            leak=Fittable(minval=-10, maxval=10)),
+                   noise=NoiseConstant(noise=1),
+                   bound=BoundCollapsingExponential(B=Fittable(minval=0.5, maxval=3),
+                                                    tau=Fittable(minval=.0001, maxval=5)),
+                   # Since we can only have one overlay, we use
+                   # OverlayChain to string together multiple overlays.
+                   # They are applied sequentially in order.  OverlayDelay
+                   # implements a non-decision time by shifting the
+                   # resulting distribution of response times by
+                   # `delaytime` seconds.
+                   overlay=OverlayChain(overlays=[OverlayNonDecision(nondectime=Fittable(minval=0, maxval=.4)),
+                                                  OverlayPoissonMixture(pmixturecoef=.02,
+                                                                        rate=1)]),
+                   dx=.001, dt=.0001, T_dur=5.1)
+
+# Before fitting this model, let’s look at it in the model GUI:
+from pyddm.plot import model_gui
+
+model_gui(model_leak, sample=data_sample)
+
+# fit model 
+fit_model_leak = fit_adjust_model(sample=data_sample, model=model_leak, verbose=False)
+
+# plot diagnostics
+pyddm.plot.plot_fit_diagnostics(model=fit_model_leak, sample=data_sample)
+
 
 
 
